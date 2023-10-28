@@ -1,4 +1,5 @@
 import { Form, ActionPanel, Action, showToast, Icon, getSelectedText, Toast, showHUD, popToRoot } from "@raycast/api";
+import { runAppleScript } from "@raycast/utils";
 import { useState, useEffect } from "react";
 import fetch from "node-fetch";
 import { Bookmark, addBookmark } from "./api";
@@ -13,29 +14,51 @@ export default function Command() {
 
   useEffect(() => {
     (async () => {
+      var pageUrl;
       try {
         const selectedText = await getSelectedText();
         console.log("selectedText", selectedText);
         if (!isValidURL(selectedText)) {
-          console.log(selectedText, "is not a valid URL");
-          return;
+          throw new Error(selectedText + " is not a valid URL");
         }
-        try {
-          const document = await loadDocument(selectedText);
-          const documentTitle = await extractDocumentTitle(document);
-          const documentDescription = await extractPageDescription(document);
-          setState((oldState) => ({
-            ...oldState,
-            url: selectedText,
-            title: documentTitle,
-            description: documentDescription,
-          }));
-        } catch (error) {
-          console.error("Could not load document title", error);
-          setState((oldState) => ({ ...oldState, url: selectedText }));
-        }
+        pageUrl = selectedText;
       } catch (error) {
-        console.error("Could not get selected text", error);
+        const output = await runAppleScript(
+          `
+tell application "System Events" to set frontApp to name of first process whose frontmost is true
+if (frontApp = "Safari") or (frontApp = "Webkit") then
+  using terms from application "Safari"
+    tell application frontApp to set currentTabUrl to URL of front document
+  end using terms from
+else if (frontApp = "Brave Browser") or (frontApp = "Google Chrome") then
+  using terms from application "Google Chrome"
+    tell application frontApp to set currentTabUrl to URL of active tab of front window
+  end using terms from
+else
+  return "ERROR"
+end if
+return currentTabUrl
+`
+        );
+        if (output == "ERROR") {
+            console.log("Couldn't determine URL of front-most application")
+            return
+        }
+        pageUrl = output;
+      }
+      try {
+        const document = await loadDocument(pageUrl);
+        const documentTitle = await extractDocumentTitle(document);
+        const documentDescription = await extractPageDescription(document);
+        setState((oldState) => ({
+          ...oldState,
+          url: pageUrl,
+          title: documentTitle,
+          description: documentDescription,
+        }));
+      } catch (error) {
+        console.error("Could not load document title", error);
+        setState((oldState) => ({ ...oldState, url: pageUrl }));
       }
     })();
   }, []);
